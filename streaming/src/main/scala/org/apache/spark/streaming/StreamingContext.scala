@@ -48,7 +48,8 @@ import org.apache.spark.streaming.receiver.Receiver
 import org.apache.spark.streaming.scheduler.{ExecutorAllocationManager, JobScheduler, StreamingListener}
 import org.apache.spark.streaming.ui.{StreamingJobProgressListener, StreamingTab}
 import org.apache.spark.util.{CallSite, ShutdownHookManager, ThreadUtils, Utils}
-
+import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import org.apache.spark.streaming.scheduler.JobSet
 /**
  * Main entry point for Spark Streaming functionality. It provides methods used to create
  * [[org.apache.spark.streaming.dstream.DStream]]s from various input sources. It can be either
@@ -63,9 +64,11 @@ import org.apache.spark.util.{CallSite, ShutdownHookManager, ThreadUtils, Utils}
 class StreamingContext private[streaming] (
     _sc: SparkContext,
     _cp: Checkpoint,
-    _batchDur: Duration
+    var _batchDur: Duration
   ) extends Logging {
 
+  val jobSets: java.util.Map[Time, JobSet] = new ConcurrentHashMap[Time, JobSet]
+  
   /**
    * Create a StreamingContext using an existing SparkContext.
    * @param sparkContext existing SparkContext
@@ -159,7 +162,7 @@ class StreamingContext private[streaming] (
       _cp.graph
     } else {
       require(_batchDur != null, "Batch duration for StreamingContext cannot be null")
-      val newGraph = new DStreamGraph()
+      val newGraph = new DStreamGraph(_sc)
       newGraph.setBatchDuration(_batchDur)
       newGraph
     }
@@ -245,6 +248,20 @@ class StreamingContext private[streaming] (
     }
   }
 
+  def changeBatchDuration(period: Long): Unit = {
+    println("SC::changeBatchDuration: was " + _batchDur + " is: " + Durations.seconds(period))
+    _batchDur = Durations.seconds(period)
+    graph.setBatchDuration(Durations.seconds(period))
+    scheduler.changeBatchDuration(period)
+  }
+  
+  def setPriorityValue(str: String): Unit = {
+      if (graph == null) {
+        println("+~+~+~+~+~+~+~+ graph is null +~+~+~++~+~+~")
+      }
+      graph.priorityValue = str
+  }
+  
   private[streaming] def isCheckpointingEnabled: Boolean = {
     checkpointDir != null
   }

@@ -26,7 +26,7 @@ import org.apache.spark.util.{CallSite, Utils}
  * Class representing a Spark computation. It may contain multiple Spark jobs.
  */
 private[streaming]
-class Job(val time: Time, func: () => _) {
+class Job(val time: Time, func: () => _) extends Comparable[Job] {
   private var _id: String = _
   private var _outputOpId: Int = _
   private var isSet = false
@@ -34,7 +34,15 @@ class Job(val time: Time, func: () => _) {
   private var _callSite: CallSite = null
   private var _startTime: Option[Long] = None
   private var _endTime: Option[Long] = None
+  var _priority: Int = 0
 
+  def compareTo(job: Job) :  Int = {
+    if (this._priority != job._priority) {
+      return job._priority - this._priority 
+    } 
+    return (this.time.milliseconds - job.time.milliseconds).toInt
+  }
+  
   def run() {
     _result = Try(func())
   }
