@@ -18,8 +18,10 @@
 package org.apache.spark.streaming.scheduler
 
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import java.util.concurrent.PriorityBlockingQueue
 
 import scala.collection.JavaConverters._
+import scala.util.control._
 import scala.util.Failure
 
 import org.apache.commons.lang3.SerializationUtils
@@ -31,6 +33,7 @@ import org.apache.spark.streaming._
 import org.apache.spark.streaming.api.python.PythonDStream
 import org.apache.spark.streaming.ui.UIUtils
 import org.apache.spark.util.{EventLoop, ThreadUtils}
+
 
 
 private[scheduler] sealed trait JobSchedulerEvent
@@ -47,11 +50,12 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
 
   // Use of ConcurrentHashMap.keySet later causes an odd runtime problem due to Java 7/8 diff
   // https://gist.github.com/AlainODea/1375759b8720a3f9f094
-  private val jobSets: java.util.Map[Time, JobSet] = new ConcurrentHashMap[Time, JobSet]
+  private val jobSets: java.util.Map[Time, JobSet] = ssc.jobSets
   private val numConcurrentJobs = ssc.conf.getInt("spark.streaming.concurrentJobs", 1)
   private val jobExecutor =
     ThreadUtils.newDaemonFixedThreadPool(numConcurrentJobs, "streaming-job-executor")
   private val jobGenerator = new JobGenerator(this)
+  private val jobQueue = new PriorityBlockingQueue[Job](200)
   val clock = jobGenerator.clock
   val listenerBus = new StreamingListenerBus(ssc.sparkContext.listenerBus)
 
@@ -65,6 +69,10 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
 
   private var eventLoop: EventLoop[JobSchedulerEvent] = null
 
+  def changeBatchDuration(period: Long): Unit = {
+    jobGenerator.changeBatchTime(period)
+  }
+  
   def start(): Unit = synchronized {
     if (eventLoop != null) return // scheduler has already been started
 
@@ -106,7 +114,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
 
   def stop(processAllReceivedData: Boolean): Unit = synchronized {
     if (eventLoop == null) return // scheduler has already been stopped
-    logDebug("Stopping JobScheduler")
+    println("Stopping JobScheduler")
 
     if (receiverTracker != null) {
       // First, stop receiving
@@ -122,7 +130,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     jobGenerator.stop(processAllReceivedData)
 
     // Stop the executor for receiving new jobs
-    logDebug("Stopping job executor")
+    println("Stopping job executor")
     jobExecutor.shutdown()
 
     // Wait for the queued jobs to complete if indicated
@@ -144,13 +152,16 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
   }
 
   def submitJobSet(jobSet: JobSet) {
+    println("submit jobset");
     if (jobSet.jobs.isEmpty) {
-      logInfo("No jobs added for time " + jobSet.time)
+      println("No jobs added for time " + jobSet.time)
     } else {
       listenerBus.post(StreamingListenerBatchSubmitted(jobSet.toBatchInfo))
       jobSets.put(jobSet.time, jobSet)
-      jobSet.jobs.foreach(job => jobExecutor.execute(new JobHandler(job)))
-      logInfo("Added jobs for time " + jobSet.time)
+      jobSet.jobs.foreach((job) => jobQueue.add(job))
+      jobSet.jobs.foreach((job) => jobExecutor.execute(new JobHandler()))
+      jobSet.jobs.foreach((job) => println("added job: " + job))
+      println("Added jobs for time " + jobSet.time)
     }
   }
 
@@ -190,7 +201,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     }
     job.setStartTime(startTime)
     listenerBus.post(StreamingListenerOutputOperationStarted(job.toOutputOperationInfo))
-    logInfo("Starting job " + job.id + " from job set of time " + jobSet.time)
+    println("jobscheduler:handleJobStart: Starting job " + job.id + " from job set of time " + jobSet.time + "job " + job)
   }
 
   private def handleJobCompletion(job: Job, completedTime: Long) {
@@ -198,7 +209,8 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     jobSet.handleJobCompletion(job)
     job.setEndTime(completedTime)
     listenerBus.post(StreamingListenerOutputOperationCompleted(job.toOutputOperationInfo))
-    logInfo("Finished job " + job.id + " from job set of time " + jobSet.time)
+    println("Finished job " + job.id + " from job set of time " + jobSet.time)
+    jobQueue.remove(job)
     if (jobSet.hasCompleted) {
       listenerBus.post(StreamingListenerBatchCompleted(jobSet.toBatchInfo))
     }
@@ -223,10 +235,13 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     PythonDStream.stopStreamingContextIfPythonProcessIsDead(e)
   }
 
-  private class JobHandler(job: Job) extends Runnable with Logging {
+  private class JobHandler() extends Runnable with Logging {
     import JobScheduler._
 
     def run() {
+      val job = jobQueue.take()
+      println("enter jobscheuler event loop");
+      println("running job: " + job)
       val oldProps = ssc.sparkContext.getLocalProperties
       try {
         ssc.sparkContext.setLocalProperties(SerializationUtils.clone(ssc.savedProperties.get()))

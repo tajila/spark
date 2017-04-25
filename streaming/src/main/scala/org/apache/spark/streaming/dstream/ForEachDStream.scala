@@ -47,10 +47,32 @@ class ForEachDStream[T: ClassTag] (
   override def generateJob(time: Time): Option[Job] = {
     parent.getOrCompute(time) match {
       case Some(rdd) =>
+        println(s"generate job ForEachDStream" + time)
         val jobFunc = () => createRDDWithLocalProperties(time, displayInnerRDDOps) {
           foreachFunc(rdd, time)
         }
+        
+        var job: Job = null
+        
+      try {
+            println("table is " + this.graph.scans)
+            val priority = this.graph.scans.get(time)
+            job = new Job(time, jobFunc)
+            if (0 < priority) {
+              println("ForEachDStream found high priority job at time " + time + " priority " + priority)
+              job._priority = priority.toInt
+            }
+      } catch {
+        case e: Exception => {
+          e.printStackTrace()
+        }
+      }
+      if (job == null) {
         Some(new Job(time, jobFunc))
+      } else {
+        Some(job)
+      }
+      
       case None => None
     }
   }

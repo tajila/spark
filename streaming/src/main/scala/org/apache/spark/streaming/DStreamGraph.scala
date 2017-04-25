@@ -18,7 +18,7 @@
 package org.apache.spark.streaming
 
 import java.io.{IOException, ObjectInputStream, ObjectOutputStream}
-
+import java.util.concurrent.ConcurrentHashMap;
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.internal.Logging
@@ -26,11 +26,15 @@ import org.apache.spark.streaming.dstream.{DStream, InputDStream, ReceiverInputD
 import org.apache.spark.streaming.scheduler.Job
 import org.apache.spark.util.Utils
 
-final private[streaming] class DStreamGraph extends Serializable with Logging {
+import org.apache.spark._
+
+final private[streaming] class DStreamGraph(_sc: SparkContext) extends Serializable with Logging {
 
   private val inputStreams = new ArrayBuffer[InputDStream[_]]()
   private val outputStreams = new ArrayBuffer[DStream[_]]()
-
+  private[streaming] val scans: java.util.Map[Time, Long] = new ConcurrentHashMap[Time, Long]
+  var priorityValue: String = null
+  
   var rememberDuration: Duration = null
   var checkpointInProgress = false
 
@@ -38,6 +42,8 @@ final private[streaming] class DStreamGraph extends Serializable with Logging {
   var startTime: Time = null
   var batchDuration: Duration = null
 
+  val sc = _sc
+  
   def start(time: Time) {
     this.synchronized {
       require(zeroTime == null, "DStream graph computation already started")
@@ -68,8 +74,9 @@ final private[streaming] class DStreamGraph extends Serializable with Logging {
 
   def setBatchDuration(duration: Duration) {
     this.synchronized {
-      require(batchDuration == null,
-        s"Batch duration already set as $batchDuration. Cannot set it again.")
+      /*require(batchDuration == null,
+        s"Batch duration already set as $batchDuration. Cannot set it again.")*/
+      println("DStream::setBatchDuration: was " + batchDuration + " is: " + duration)
       batchDuration = duration
     }
   }
@@ -111,15 +118,16 @@ final private[streaming] class DStreamGraph extends Serializable with Logging {
   }
 
   def generateJobs(time: Time): Seq[Job] = {
-    logDebug("Generating jobs for time " + time)
+    println("Generating jobs for time " + time)
     val jobs = this.synchronized {
       outputStreams.flatMap { outputStream =>
+        println(outputStream)
         val jobOption = outputStream.generateJob(time)
         jobOption.foreach(_.setCallSite(outputStream.creationSite))
         jobOption
       }
     }
-    logDebug("Generated " + jobs.length + " jobs for time " + time)
+    println("Generated " + jobs.length + " jobs for time " + time)
     jobs
   }
 

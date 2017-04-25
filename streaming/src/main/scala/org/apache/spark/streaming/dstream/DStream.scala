@@ -278,7 +278,7 @@ abstract class DStream[T: ClassTag] (
     logInfo(s"Storage level = ${storageLevel.description}")
     logInfo(s"Checkpoint interval = $checkpointDuration")
     logInfo(s"Remember interval = $rememberDuration")
-    logInfo(s"Initialized and validated $this")
+    println(s"Initialized and validated $this")
   }
 
   private[streaming] def setContext(s: StreamingContext) {
@@ -311,7 +311,7 @@ abstract class DStream[T: ClassTag] (
     if (!isInitialized) {
       throw new SparkException (this + " has not been initialized")
     } else if (time <= zeroTime || ! (time - zeroTime).isMultipleOf(slideDuration)) {
-      logInfo(s"Time $time is invalid as zeroTime is $zeroTime" +
+      println(s"Time $time is invalid as zeroTime is $zeroTime" +
         s" , slideDuration is $slideDuration and difference is ${time - zeroTime}")
       false
     } else {
@@ -356,6 +356,7 @@ abstract class DStream[T: ClassTag] (
         }
         rddOption
       } else {
+        println("***not a valid time in sliding window***")
         None
       }
     }
@@ -428,13 +429,16 @@ abstract class DStream[T: ClassTag] (
    * to generate their own jobs.
    */
   private[streaming] def generateJob(time: Time): Option[Job] = {
+    println(s"generate job DStream" + time)
     getOrCompute(time) match {
       case Some(rdd) =>
         val jobFunc = () => {
           val emptyFunc = { (iterator: Iterator[T]) => {} }
           context.sparkContext.runJob(rdd, emptyFunc)
         }
-        Some(new Job(time, jobFunc))
+         val job = new Job(time, jobFunc)
+        println("dstream: created job: " + job)
+        Some(job)
       case None => None
     }
   }
@@ -458,8 +462,14 @@ abstract class DStream[T: ClassTag] (
         // Explicitly remove blocks of BlockRDD
         rdd match {
           case b: BlockRDD[_] =>
-            logInfo(s"Removing blocks of RDD $b of time $time")
-            b.removeBlocks()
+            println("____ remove RDD ____ " + rdd.name + " " + rdd.id)
+            val searchTime = new Time(java.lang.Long.parseLong(b.name.replace(" ms", "")))
+            val jobset = this.ssc.jobSets.get(searchTime)
+            println("searching for " + searchTime + " found " + jobset)
+            if (null == jobset) {
+              println(s"Removing blocks of RDD $b of time $time")
+              b.removeBlocks()
+            }
           case _ =>
         }
       }
