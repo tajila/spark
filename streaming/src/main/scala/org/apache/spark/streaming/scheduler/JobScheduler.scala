@@ -19,20 +19,21 @@ package org.apache.spark.streaming.scheduler
 
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import java.util.concurrent.PriorityBlockingQueue
+import java.util.concurrent.atomic.LongAccumulator
+import java.lang.Thread
+import java.util.function.LongUnaryOperator
 
 import scala.collection.JavaConverters._
 import scala.util.control._
 import scala.util.Failure
-
 import org.apache.commons.lang3.SerializationUtils
-
-import org.apache.spark.ExecutorAllocationClient
+import org.apache.spark.{ExecutorAllocationClient, SparkContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.{PairRDDFunctions, RDD}
 import org.apache.spark.streaming._
 import org.apache.spark.streaming.api.python.PythonDStream
 import org.apache.spark.streaming.ui.UIUtils
-import org.apache.spark.util.{EventLoop, ThreadUtils}
+import org.apache.spark.util.{AccumulatorContext, EventLoop, LongAccumulator, ThreadUtils}
 
 
 
@@ -52,13 +53,16 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
   // https://gist.github.com/AlainODea/1375759b8720a3f9f094
   private val jobSets: java.util.Map[Time, JobSet] = ssc.jobSets
   private val numConcurrentJobs = ssc.conf.getInt("spark.streaming.concurrentJobs", 1)
-  private val jobExecutor =
-    ThreadUtils.newDaemonFixedThreadPool(numConcurrentJobs, "streaming-job-executor")
+  private val jobExecutor = ThreadUtils.newDaemonFixedThreadPool(numConcurrentJobs, "streaming-job-executor")
   private val jobGenerator = new JobGenerator(this)
+  private val runningMap = new scala.collection.concurrent.TrieMap[Long, Job]()
   private val jobQueue = new PriorityBlockingQueue[Job](200)
   val clock = jobGenerator.clock
   val listenerBus = new StreamingListenerBus(ssc.sparkContext.listenerBus)
-
+  private var queueSize = ssc.accum
+  private var queueSize2 = ssc.accum2
+  private var queueSize3 = ssc.accum3
+  val stopSampler = false
   // These two are created only when scheduler starts.
   // eventLoop not being null means the scheduler has been started and not stopped
   var receiverTracker: ReceiverTracker = null
@@ -109,6 +113,55 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     receiverTracker.start()
     jobGenerator.start()
     executorAllocationManager.foreach(_.start())
+
+    val sampler = new Thread(new Runnable() {
+      def run(): Unit = {
+        while (!stopSampler) {
+          Thread.sleep(50)
+          var count = 0D
+          var count2 = 0D
+          var receiverCount = 0D
+
+          if (null == queueSize) {
+            queueSize = ssc.accum
+            queueSize2 = ssc.accum2
+            queueSize3 = ssc.accum3
+          }
+          if (null != queueSize) {
+            //println("pre queue size=" + jobQueue.size());
+            val iter2 = runningMap.iterator
+            while (iter2.hasNext) {
+              val job = iter2.next()._2
+              count += (job._count)/2.0
+              //println("job: " + job)
+            }
+
+            val iter = jobQueue.iterator()
+            while (iter.hasNext) {
+              val job = iter.next()
+
+              if (job.outputOpId == 0) {
+                count2 += job._count.toDouble
+              }
+
+              //println("job: " + job)
+            }
+
+
+           //println("running queue: " + count + " vs " + ssc.sc.runningTasks)
+            //println("waiting queue: " + count2)
+            //println("receiver queue: " + ssc.scheduler.receiverTracker.receivedBlockTracker.numOfRecords)
+            receiverCount += ssc.scheduler.receiverTracker.receivedBlockTracker.numOfRecords.toDouble
+            //println("total: " + (count2 + count + receiverCount))
+            queueSize.add((receiverCount + count2).toDouble)
+            queueSize2.add(count.toDouble)
+            //queueSize3.add(SparkContext.runningRecords.get())
+
+          }
+
+        }
+      }
+    }).start()
     logInfo("Started JobScheduler")
   }
 
@@ -152,16 +205,16 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
   }
 
   def submitJobSet(jobSet: JobSet) {
-    println("submit jobset");
     if (jobSet.jobs.isEmpty) {
       println("No jobs added for time " + jobSet.time)
     } else {
+
+
+      jobSet.jobs.foreach((job) => jobExecutor.execute(new JobHandler()))
       listenerBus.post(StreamingListenerBatchSubmitted(jobSet.toBatchInfo))
       jobSets.put(jobSet.time, jobSet)
       jobSet.jobs.foreach((job) => jobQueue.add(job))
-      jobSet.jobs.foreach((job) => jobExecutor.execute(new JobHandler()))
-      jobSet.jobs.foreach((job) => println("added job: " + job))
-      println("Added jobs for time " + jobSet.time)
+
     }
   }
 
@@ -201,7 +254,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     }
     job.setStartTime(startTime)
     listenerBus.post(StreamingListenerOutputOperationStarted(job.toOutputOperationInfo))
-    println("jobscheduler:handleJobStart: Starting job " + job.id + " from job set of time " + jobSet.time + "job " + job)
+    //println("jobscheduler:handleJobStart: Starting job " + job.id + " from job set of time " + jobSet.time + "job " + job)
   }
 
   private def handleJobCompletion(job: Job, completedTime: Long) {
@@ -209,8 +262,8 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     jobSet.handleJobCompletion(job)
     job.setEndTime(completedTime)
     listenerBus.post(StreamingListenerOutputOperationCompleted(job.toOutputOperationInfo))
-    println("Finished job " + job.id + " from job set of time " + jobSet.time)
-    jobQueue.remove(job)
+    //println("Finished job " + job.id + " from job set of time " + jobSet.time)
+
     if (jobSet.hasCompleted) {
       listenerBus.post(StreamingListenerBatchCompleted(jobSet.toBatchInfo))
     }
@@ -239,9 +292,19 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     import JobScheduler._
 
     def run() {
+      //println("start job queue size=" + jobQueue.size())
       val job = jobQueue.take()
-      println("enter jobscheuler event loop");
-      println("running job: " + job)
+
+      //if (0 != SparkContext.runningRecords.get()) throw new RuntimeException("should have emptied")
+
+//      SparkContext.runningRecords.getAndUpdate(new LongUnaryOperator {
+//        override def applyAsLong(operand: Long): Long = {
+//          return job._count;
+//        }
+//      });
+      //println("start2 job queue size=" + jobQueue.size() + " job records=" + job._count)
+      //println("enter jobscheuler event loop");
+      //println("running job: " + job)
       val oldProps = ssc.sparkContext.getLocalProperties
       try {
         ssc.sparkContext.setLocalProperties(SerializationUtils.clone(ssc.savedProperties.get()))
@@ -263,6 +326,8 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
         // it's possible that when `post` is called, `eventLoop` happens to null.
         var _eventLoop = eventLoop
         if (_eventLoop != null) {
+          val time =  clock.getTimeMillis()
+          runningMap.put(time,job)
           _eventLoop.post(JobStarted(job, clock.getTimeMillis()))
           // Disable checks for existing output directories in jobs launched by the streaming
           // scheduler, since we may need to write output to an existing directory during checkpoint
@@ -274,6 +339,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
           if (_eventLoop != null) {
             _eventLoop.post(JobCompleted(job, clock.getTimeMillis()))
           }
+          runningMap.remove(time)
         } else {
           // JobScheduler has been stopped.
         }

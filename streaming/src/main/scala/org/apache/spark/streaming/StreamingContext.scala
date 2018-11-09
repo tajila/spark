@@ -18,6 +18,7 @@
 package org.apache.spark.streaming
 
 import java.io.{InputStream, NotSerializableException}
+import java.lang.invoke.MethodHandle
 import java.util.Properties
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 
@@ -25,14 +26,13 @@ import scala.collection.Map
 import scala.collection.mutable.Queue
 import scala.reflect.ClassTag
 import scala.util.control.NonFatal
-
+import scala.collection.mutable.HashMap
 import org.apache.commons.lang3.SerializationUtils
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.io.{BytesWritable, LongWritable, Text}
 import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat}
 import org.apache.hadoop.mapreduce.lib.input.TextInputFormat
-
 import org.apache.spark._
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.deploy.SparkHadoopUtil
@@ -47,8 +47,9 @@ import org.apache.spark.streaming.dstream._
 import org.apache.spark.streaming.receiver.Receiver
 import org.apache.spark.streaming.scheduler.{ExecutorAllocationManager, JobScheduler, StreamingListener}
 import org.apache.spark.streaming.ui.{StreamingJobProgressListener, StreamingTab}
-import org.apache.spark.util.{CallSite, ShutdownHookManager, ThreadUtils, Utils}
+import org.apache.spark.util._
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+
 import org.apache.spark.streaming.scheduler.JobSet
 /**
  * Main entry point for Spark Streaming functionality. It provides methods used to create
@@ -155,6 +156,14 @@ class StreamingContext private[streaming] (
 
   private[streaming] val env = sc.env
 
+  var accum :CollectionAccumulator[Double] = null
+
+  var accum2 :CollectionAccumulator[Double] = null
+
+  var accum3 :CollectionAccumulator[Double] = null
+
+  var incoming :LongAccumulator = null
+
   private[streaming] val graph: DStreamGraph = {
     if (isCheckpointPresent) {
       _cp.graph.setContext(this)
@@ -260,6 +269,33 @@ class StreamingContext private[streaming] (
         println("+~+~+~+~+~+~+~+ graph is null +~+~+~++~+~+~")
       }
       graph.priorityValue = str
+  }
+
+  def setPriority(map: HashMap[String, Long]): Unit = {
+    if (graph == null) {
+      println("+~+~+~+~+~+~+~+ graph is null +~+~+~++~+~+~")
+    }
+    graph.priorityMap = map
+  }
+
+  def setExtractor(extractor: MethodHandle): Unit = {
+    graph.extractor = extractor
+  }
+
+  def setQueueSize(accum: CollectionAccumulator[Double]): Unit = {
+    this.accum = accum
+  }
+
+  def setQueueSize2(accum: CollectionAccumulator[Double]): Unit = {
+    this.accum2 = accum
+  }
+
+  def setQueueSize3(accum: CollectionAccumulator[Double]): Unit = {
+    this.accum3 = accum
+  }
+
+  def setIncoming(incoming: LongAccumulator) : Unit = {
+    this.incoming = incoming
   }
   
   private[streaming] def isCheckpointingEnabled: Boolean = {

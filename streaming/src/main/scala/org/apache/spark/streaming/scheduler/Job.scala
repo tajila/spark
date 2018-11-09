@@ -35,6 +35,7 @@ class Job(val time: Time, func: () => _) extends Comparable[Job] {
   private var _startTime: Option[Long] = None
   private var _endTime: Option[Long] = None
   var _priority: Int = 0
+  var _count:Long = 0
 
   def compareTo(job: Job) :  Int = {
     if (this._priority != job._priority) {

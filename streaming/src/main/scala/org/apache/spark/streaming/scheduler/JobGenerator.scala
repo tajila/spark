@@ -79,19 +79,19 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
   private var lastProcessedBatch: Time = null
 
   def changeBatchTime(period: Long): Unit = synchronized {
-    println("changing batch time start")
+    //println("changing batch time start")
     //stop(true)
     //println("stopped all jobs")
     val start = System.currentTimeMillis()
     timer.stop(true)
     timer = new RecurringTimer(clock, Durations.seconds(period).milliseconds,
     longTime => eventLoop.post(GenerateJobs(new Time(longTime))), "JobGenerator")
-    println("reset timer: " + ssc.graph.batchDuration.milliseconds + " sec: " + period)
+    //println("reset timer: " + ssc.graph.batchDuration.milliseconds + " sec: " + period)
     //restart(new Time(start))
     //timer.start(start);
     val startTime = new Time(timer.getStartTime())
     timer.start(startTime.milliseconds)
-    println("timer restart complete")
+    //println("timer restart complete")
     //graph.restart(new Time(start) - graph.batchDuration)
     //println("graph restart complete")
   }
@@ -155,7 +155,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
       // Stop generating jobs
       val stopTime = timer.stop(interruptTimer = false)
       graph.stop()
-      println("Stopped generation timer")
+      //println("Stopped generation timer")
 
       // Wait for the jobs to complete and checkpoints to be written
       def haveAllBatchesBeenProcessed: Boolean = {
@@ -198,7 +198,7 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
 
   /** Processes all events */
   private def processEvent(event: JobGeneratorEvent) {
-    println("Got event " + event)
+    //println("Got event " + event)
     event match {
       case GenerateJobs(time) => generateJobs(time)
       case ClearMetadata(time) => clearMetadata(time)
@@ -271,18 +271,18 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
   private def generateJobs(time: Time) {
     // Checkpoint all RDDs marked for checkpointing to ensure their lineages are
     // truncated periodically. Otherwise, we may run into stack overflows (SPARK-6847).
-     println("++++++++++++++ generate jobs " + time + " ++++++++++++++ " + System.currentTimeMillis());
+     //println("++++++++++++++ generate jobs " + time + " ++++++++++++++ " + System.currentTimeMillis());
     ssc.sparkContext.setLocalProperty(RDD.CHECKPOINT_ALL_MARKED_ANCESTORS, "true")
     Try {
       jobScheduler.receiverTracker.allocateBlocksToBatch(time) // allocate received blocks to batch
       graph.generateJobs(time) // generate jobs using allocated block
     } match {
       case Success(jobs) =>
-        println("Success generating jobs for time " + time)
+        //println("Success generating jobs for time " + time)
         val streamIdToInputInfos = jobScheduler.inputInfoTracker.getInfo(time)
         jobScheduler.submitJobSet(JobSet(time, jobs, streamIdToInputInfos))
       case Failure(e) =>
-        println("Error generating jobs for time " + time)
+        //println("Error generating jobs for time " + time)
         jobScheduler.reportError("Error generating jobs for time " + time, e)
         PythonDStream.stopStreamingContextIfPythonProcessIsDead(e)
     }

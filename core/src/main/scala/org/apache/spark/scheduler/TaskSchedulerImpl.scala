@@ -25,11 +25,12 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.Set
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.util.Random
-
 import org.apache.spark._
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.config
+import org.apache.spark.rdd.RDD
+import org.apache.spark.scheduler.ResultTask
 import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
 import org.apache.spark.scheduler.TaskLocality.TaskLocality
 import org.apache.spark.scheduler.local.LocalSchedulerBackend
@@ -172,7 +173,9 @@ private[spark] class TaskSchedulerImpl(
   override def submitTasks(taskSet: TaskSet) {
     val tasks = taskSet.tasks
     logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
+    //println("TaskSchedulerImpl::submitTasks Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
     this.synchronized {
+
       val manager = createTaskSetManager(taskSet, maxTaskFailures)
       val stage = taskSet.stageId
       val stageTaskSets =
@@ -186,7 +189,6 @@ private[spark] class TaskSchedulerImpl(
           s" ${stageTaskSets.toSeq.map{_._2.taskSet.id}.mkString(",")}")
       }
       schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)
-
       if (!isLocal && !hasReceivedTask) {
         starvationTimer.scheduleAtFixedRate(new TimerTask() {
           override def run() {
@@ -238,6 +240,18 @@ private[spark] class TaskSchedulerImpl(
    * cleaned up.
    */
   def taskSetFinished(manager: TaskSetManager): Unit = synchronized {
+    //print("remove before " + sc.runningTasks )
+//    for (t <- manager.tasks) {
+//      //println("_----------------")
+//      //print("remove before " + sc.runningTasks )
+//      val n = sc.runningMap.get(t.toString)
+//      sc.runningTasks -= n
+//      //println(" remove after " + sc.runningTasks + " dec " + t.runningRecords)
+//      //println("this: " + t + " runningrecords: " + t.runningRecords)
+//      //println("_----------------")
+//    }
+
+
     taskSetsByStageIdAndAttempt.get(manager.taskSet.stageId).foreach { taskSetsForStage =>
       taskSetsForStage -= manager.taskSet.stageAttemptId
       if (taskSetsForStage.isEmpty) {
@@ -312,11 +326,15 @@ private[spark] class TaskSchedulerImpl(
     val shuffledOffers = Random.shuffle(offers)
     // Build a list of tasks to assign to each worker.
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.cores))
+    //println("TaskSchedulerImpl::resourceOffers tasksize " + tasks.size);
     val availableCpus = shuffledOffers.map(o => o.cores).toArray
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
     for (taskSet <- sortedTaskSets) {
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(
         taskSet.parent.name, taskSet.name, taskSet.runningTasks))
+
+      //println("TaskSchedulerImpl::resourceOffers parentName: %s, name: %s, runningTasks: %s".format(
+      //  taskSet.parent.name, taskSet.name, taskSet.runningTasks))
       if (newExecAvail) {
         taskSet.executorAdded()
       }
@@ -506,7 +524,7 @@ private[spark] class TaskSchedulerImpl(
           case None =>
             // We may get multiple executorLost() calls with different loss reasons. For example,
             // one may be triggered by a dropped connection from the slave while another may be a
-            // report of executor termination from Mesos. We produce log messages for both so we
+            // report of executor tertaskSetsByStageIdAndAttemptmination from Mesos. We produce log messages for both so we
             // eventually report the termination reason.
             logError(s"Lost an executor $executorId (already removed): $reason")
         }

@@ -68,6 +68,7 @@ abstract class ReceiverInputDStream[T: ClassTag](_ssc: StreamingContext)
   /**
    * Generates RDDs with blocks received by the receiver of this stream. */
   override def compute(validTime: Time): Option[RDD[T]] = {
+    var numOfRecords = 0L
     val blockRDD = {
 
       if (validTime < graph.startTime) {
@@ -85,6 +86,8 @@ abstract class ReceiverInputDStream[T: ClassTag](_ssc: StreamingContext)
         val inputInfo = StreamInputInfo(id, blockInfos.flatMap(_.numRecords).sum)
         ssc.scheduler.inputInfoTracker.reportInfo(validTime, inputInfo)
 
+        numOfRecords = inputInfo.numRecords
+
         // Create the BlockRDD
         createBlockRDD(validTime, blockInfos)
       }
@@ -93,20 +96,55 @@ abstract class ReceiverInputDStream[T: ClassTag](_ssc: StreamingContext)
       val pVal = this.graph.priorityValue
       val accum = this.graph.sc.longAccumulator("scans")
       accum.reset()
-      blockRDD.foreach { (e) => 
+      blockRDD.foreach { (e) =>
         if (e.toString().contains(pVal)) {
-          println("Receiver found high priority job at time " + validTime)
+          //println("Receiver found high priority job at time " + validTime)
           accum.add(1L)
         }
       }
-      println("accum is " + accum)
+      //println("accum is " + accum)
       if (accum.value != 0) {
           this.graph.scans.put(validTime, accum.value)
-          println("table is " + this.graph.scans)
+          //println("table is " + this.graph.scans)
       }
     }
-    
 
+    if (this.graph.extractor != null) {
+      for ((string: String, priority: Long) <- this.graph.priorityMap) {
+        val accum = this.graph.sc.longAccumulator("scans")
+        accum.reset()
+        blockRDD.foreach((e)=>{
+          if (this.graph.extractor.invoke(e).asInstanceOf[String].contains(string)) {
+            //println("Receiver found high priority job at time " + validTime)
+            accum.add(priority)
+          }
+        })
+        if (accum.value != 0) {
+          this.graph.scans.put(validTime, accum.value)
+          //println("table is " + this.graph.scans)
+        }
+      }
+    } else if (null != this.graph.priorityMap) {
+      for ((string: String, priority: Long) <- this.graph.priorityMap) {
+        val accum = this.graph.sc.longAccumulator("scans")
+        accum.reset()
+        blockRDD.foreach { (e) => {
+
+            if (e.toString().contains(string)) {
+              //println("Receiver found high priority job at time " + validTime)
+              accum.add(priority)
+            }
+          }
+        }
+        if (accum.value != 0) {
+          this.graph.scans.put(validTime, accum.value)
+          //println("table is " + this.graph.scans)
+        }
+      }
+    }
+    //println("receiver count: " + blockRDD.count() + " nor: " + numOfRecords)
+    _ssc.incoming.add(blockRDD.count())
+    this.graph.count.put(validTime, blockRDD.count())
     Some(blockRDD)
   }
 

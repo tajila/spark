@@ -18,14 +18,15 @@
 package org.apache.spark.streaming
 
 import java.io.{IOException, ObjectInputStream, ObjectOutputStream}
-import java.util.concurrent.ConcurrentHashMap;
-import scala.collection.mutable.ArrayBuffer
+import java.lang.invoke.MethodHandle
+import java.util.concurrent.ConcurrentHashMap
 
+import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.HashMap
 import org.apache.spark.internal.Logging
 import org.apache.spark.streaming.dstream.{DStream, InputDStream, ReceiverInputDStream}
 import org.apache.spark.streaming.scheduler.Job
 import org.apache.spark.util.Utils
-
 import org.apache.spark._
 
 final private[streaming] class DStreamGraph(_sc: SparkContext) extends Serializable with Logging {
@@ -33,7 +34,11 @@ final private[streaming] class DStreamGraph(_sc: SparkContext) extends Serializa
   private val inputStreams = new ArrayBuffer[InputDStream[_]]()
   private val outputStreams = new ArrayBuffer[DStream[_]]()
   private[streaming] val scans: java.util.Map[Time, Long] = new ConcurrentHashMap[Time, Long]
+  private[streaming] val count: java.util.Map[Time, Long] = new ConcurrentHashMap[Time, Long]
+  var extractor: MethodHandle = null
+
   var priorityValue: String = null
+  var priorityMap: HashMap[String, Long] = null
   
   var rememberDuration: Duration = null
   var checkpointInProgress = false
@@ -118,16 +123,16 @@ final private[streaming] class DStreamGraph(_sc: SparkContext) extends Serializa
   }
 
   def generateJobs(time: Time): Seq[Job] = {
-    println("Generating jobs for time " + time)
+    //println("Generating jobs for time " + time)
     val jobs = this.synchronized {
       outputStreams.flatMap { outputStream =>
-        println(outputStream)
+        //println(outputStream)
         val jobOption = outputStream.generateJob(time)
         jobOption.foreach(_.setCallSite(outputStream.creationSite))
         jobOption
       }
     }
-    println("Generated " + jobs.length + " jobs for time " + time)
+    //println("Generated " + jobs.length + " jobs for time " + time)
     jobs
   }
 

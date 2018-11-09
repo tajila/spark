@@ -84,6 +84,19 @@ private[spark] class ResultTask[T, U](
       threadMXBean.getCurrentThreadCpuTime - deserializeStartCpuTime
     } else 0L
 
+//    if (null != rdd) {
+//      try {
+//        val sc = SparkContext.getActive.get
+//        val runningRecords = rdd.iterator(partition, context).size
+//        sc.runningTasks += runningRecords
+//        sc.runningMap.put(this.toString, runningRecords)
+//      } catch {
+//        case e: Exception => {
+//          e.printStackTrace()
+//        }
+//      }
+//    }
+
     func(context, rdd.iterator(partition, context))
   }
 

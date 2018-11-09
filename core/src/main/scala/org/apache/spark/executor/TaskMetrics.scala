@@ -46,8 +46,8 @@ class TaskMetrics private[spark] () extends Serializable {
   // Each metric is internally represented as an accumulator
   private val _executorDeserializeTime = new LongAccumulator
   private val _executorDeserializeCpuTime = new LongAccumulator
-  private val _executorRunTime = new LongAccumulator
-  private val _executorCpuTime = new LongAccumulator
+  val _executorRunTime = new LongAccumulator
+  val _executorCpuTime = new LongAccumulator
   private val _resultSize = new LongAccumulator
   private val _jvmGCTime = new LongAccumulator
   private val _resultSerializationTime = new LongAccumulator

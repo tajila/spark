@@ -462,12 +462,12 @@ abstract class DStream[T: ClassTag] (
         // Explicitly remove blocks of BlockRDD
         rdd match {
           case b: BlockRDD[_] =>
-            println("____ remove RDD ____ " + rdd.name + " " + rdd.id)
+            //println("____ remove RDD ____ " + rdd.name + " " + rdd.id)
             val searchTime = new Time(java.lang.Long.parseLong(b.name.replace(" ms", "")))
             val jobset = this.ssc.jobSets.get(searchTime)
-            println("searching for " + searchTime + " found " + jobset)
+            //println("searching for " + searchTime + " found " + jobset)
             if (null == jobset) {
-              println(s"Removing blocks of RDD $b of time $time")
+              //println(s"Removing blocks of RDD $b of time $time")
               b.removeBlocks()
             }
           case _ =>

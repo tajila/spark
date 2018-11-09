@@ -23,12 +23,12 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.util.Properties
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import java.util.function.LongUnaryOperator
 import javax.annotation.concurrent.GuardedBy
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.util.control.NonFatal
-
 import org.apache.spark._
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
@@ -292,7 +292,9 @@ private[spark] class Executor(
 
         // Must be set before updateDependencies() is called, in case fetching dependencies
         // requires access to properties contained within (e.g. for access control).
+        println("fail------>1")
         Executor.taskDeserializationProps.set(taskProps)
+        println("fail------>1")
 
         updateDependencies(taskFiles, taskJars)
         task = ser.deserialize[Task[Any]](taskBytes, Thread.currentThread.getContextClassLoader)
@@ -465,7 +467,20 @@ private[spark] class Executor(
             SparkUncaughtExceptionHandler.uncaughtException(t)
           }
 
+
+
       } finally {
+//        val result = Executor.runtime.updateAndGet(new LongUnaryOperator() {
+//          override def applyAsLong(operand: Long): Long = {
+//            return operand + task.metrics._executorRunTime.sum
+//          }
+//        })
+//
+//        Executor.runtimeCpu.updateAndGet(new LongUnaryOperator() {
+//          override def applyAsLong(operand: Long): Long = {
+//            return operand + task.metrics._executorCpuTime.sum
+//          }
+//        })
         runningTasks.remove(taskId)
       }
     }
@@ -726,4 +741,10 @@ private[spark] object Executor {
   // task is fully deserialized. When possible, the TaskContext.getLocalProperty call should be
   // used instead.
   val taskDeserializationProps: ThreadLocal[Properties] = new ThreadLocal[Properties]
+
+  //val sc = SparkContext.getOrCreate()
+
+  //val runtime = sc.runTime
+
+  //val runtimeCpu = sc.runTimeCpu
 }

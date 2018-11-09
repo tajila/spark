@@ -17,9 +17,9 @@
 
 package org.apache.spark.streaming.scheduler
 
-import scala.collection.mutable.HashSet
-
 import org.apache.spark.streaming.Time
+
+import scala.collection.mutable.HashSet
 
 /**
  * Class representing a set of Jobs

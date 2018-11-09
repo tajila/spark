@@ -89,11 +89,27 @@ private[spark] class ShuffleMapTask(
       threadMXBean.getCurrentThreadCpuTime - deserializeStartCpuTime
     } else 0L
 
+//    if (null != rdd) {
+//      try {
+//        val sc = SparkContext.getActive.get
+//        val runningRecords = rdd.iterator(partition, context).size
+//        sc.runningTasks += runningRecords
+//        sc.runningMap.put(this.toString, runningRecords)
+//      } catch {
+//        case e: Exception => {
+//          e.printStackTrace()
+//        }
+//      }
+//    }
+
+
     var writer: ShuffleWriter[Any, Any] = null
     try {
       val manager = SparkEnv.get.shuffleManager
       writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
-      writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
+      val records = rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]]
+      //println("ShuffleMapTask:runTask records=" + records.size)
+      writer.write(records)
       writer.stop(success = true).get
     } catch {
       case e: Exception =>
